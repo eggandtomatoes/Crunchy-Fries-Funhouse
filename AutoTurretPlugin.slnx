@@ -1,0 +1,8 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+  </Configurations>
+  <Project Path="AutoTurretPlugin.csproj" Id="16074ad6-b2aa-48af-9e87-d12442a2ab66">
+    <Platform Project="x64" />
+  </Project>
+</Solution>
