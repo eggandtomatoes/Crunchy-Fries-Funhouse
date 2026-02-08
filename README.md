@@ -1,1 +1,1 @@
-Server plugins for the CFF server. Mainly focoused on simulated game courts.
+Plugins for the CFF server. Use anything you need in here.
