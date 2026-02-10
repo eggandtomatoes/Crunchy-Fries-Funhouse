@@ -7,123 +7,165 @@ using Exiled.API.Features.Items.FirearmModules;
 using Exiled.API.Interfaces;
 using Exiled.Events.EventArgs.Player;
 using Exiled.Permissions.Extensions;
+using LabApi.Events.Handlers;
 using PlayerRoles;
 using System;
+using Exiled.Events;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Threading;
-using System.Threading.Tasks;
-using UnityEngine;
-using static PlayerList;
-using static UnityEngine.GraphicsBuffer;
 
-namespace AutoTurretPlugin
+namespace Blizzard
 {
-
     public class Config : IConfig
     {
 
-        [Description("IsDebugOn")]
+        public bool IsEnabled { get; set; } = true;
 
         public bool Debug { get; set; } = false;
 
-        [Description("启用自动炮塔")]
-        public bool IsEnabled { get; set; } = true;
+        public string BlizzardPermission { get; set; } = "Weather.Blizzard";
 
-        [Description("射程")]
-        public float Range { get ; set ; } = 1000 ;
+        public TimeSpan BlizzardDurationTime { get; set; } = TimeSpan.FromMinutes(10);
 
-        [Description("初始血量")]
+        public TimeSpan MedkitHeatTime { get; set; } = TimeSpan.FromSeconds(30);
 
-        public int StandardHealth { get; set; } = 300;
+        public byte BlizStrongness { get; set; } = 100 ;
 
-        [Description("炮塔生成所需权限")]
-
-        public string SpawnTurretPermissions { get; set; } = "autoturret.spawn";
-
-        [Description("弹匣容量")]
-
-        public int MagazineCapacity { get; set; } = 1500;
-
+        public float BlizzardZoneY { get; set; } = 270f;
 
     }
-    public class TurrletPlugin : Plugin<Config>
+
+    public class BlizzardPlugin : Plugin<Config>
     {
-        public static TurrletPlugin Instance { get; private set; }
 
-        public override string Name => "autoTurlet";
+        public static BlizzardPlugin Instance { get; private set; }
+        public override string Name => "Blizzard";
 
-        public override string Author => "site27-WhiteDoor | killjsj";
+        public override string Author => "site27-whitedoor";
 
-        public override Version Version => new Version(1, 2, 1);
+        public override Version Version => new Version(1, 0, 0);
 
-        public static readonly Dictionary<Player, CancellationTokenSource> turretTasks = new Dictionary<Player, CancellationTokenSource>();
+        internal Dictionary<Int64, DateTime> LastHeat;
+
+        internal Dictionary<Int64, bool> InBlizzard;
+
+        internal CancellationTokenSource ctsBlz;
+
+        internal readonly object _dictLock = new object();
+
         public override void OnEnabled()
         {
+            Log.Info("[Blizzard] Plugin Is Preped");
+
             Instance = this;
 
-            Statics._cnt = 0;
+            ctsBlz = null;
 
-            Exiled.Events.Handlers.Player.Dying += OnTurretDying;
-            Exiled.Events.Handlers.Player.Jumping += ListCheck;
+            LastHeat = new Dictionary<Int64, DateTime>();
+            InBlizzard = new Dictionary<Int64, bool>();
 
-            Log.Info("autoturrlets are set!");
+            Exiled.Events.Handlers.Player.UsedItem += OnUsingItem;
+            Exiled.Events.Handlers.Player.Joined += OnPlayerJoined;
+            Exiled.Events.Handlers.Player.Left += OnPlayerLeft;
+            Exiled.Events.Handlers.Player.Died += OnPlayerDied;
 
             base.OnEnabled();
         }
-
         public override void OnDisabled()
         {
+            Log.Info("[Blizzard] Plugin Is No More Avaliable");
 
-            Exiled.Events.Handlers.Player.Dying -= OnTurretDying;
-            Exiled.Events.Handlers.Player.Jumping -= ListCheck;
+            ctsBlz?.Cancel();
+            ctsBlz?.Dispose();
+            ctsBlz = null;
 
-            foreach ( var cts in turretTasks.Values)
-            {
+            LastHeat.Clear();
+            InBlizzard.Clear();
 
-                cts.Cancel();
-                cts.Dispose();
-
-            }
-            turretTasks.Clear();
+            Exiled.Events.Handlers.Player.UsedItem -= OnUsingItem;
+            Exiled.Events.Handlers.Player.Joined -= OnPlayerJoined;
+            Exiled.Events.Handlers.Player.Left -= OnPlayerLeft;
+            Exiled.Events.Handlers.Player.Died -= OnPlayerDied;
 
             Instance = null;
-
-            Log.Info("autoturrlets are now banned!");
 
             base.OnDisabled();
         }
 
-        private void OnTurretDying(DyingEventArgs ev)
+        private void OnUsingItem(UsedItemEventArgs ev)
         {
-
-            Log.Info("checking if a turret is downed");
-            if (turretTasks.ContainsKey( ev.Player ))
+            if (ev.Item.Type == ItemType.Medkit)
             {
 
-                Log.Info("a turret has been downed");
-                
-                Npc turret = ev.Player as Npc;
+                lock (_dictLock)
+                {
 
-                turret.ExplodeEffect(ProjectileType.FragGrenade);
+                    if (LastHeat.ContainsKey(ev.Player.Id))
+                    {
+                        LastHeat[ev.Player.Id] = DateTime.UtcNow;
+                    }
+                    else
+                    {
+                        LastHeat.Add(ev.Player.Id, DateTime.UtcNow);
+                    }
 
-                turret.ClearInventory();
-
-                turret.Destroy();
+                }
 
             }
         }
 
-        private void ListCheck(JumpingEventArgs ev)
+        private void OnPlayerJoined(JoinedEventArgs ev)
         {
-            
-            foreach (var key in turretTasks.Keys)
+            lock (_dictLock)
             {
-                Log.Info($"当前字典内的炮塔有：{key.Nickname}");
+
+                if (!LastHeat.ContainsKey(ev.Player.Id))
+                {
+                    LastHeat.Add(ev.Player.Id, DateTime.MinValue);
+                }
+                if (!InBlizzard.ContainsKey(ev.Player.Id))
+                {
+                    InBlizzard.Add(ev.Player.Id, false);
+                }
+
+            }
+        }
+
+        private void OnPlayerLeft(LeftEventArgs ev)
+        {
+
+            lock (_dictLock)
+            {
+
+                if (LastHeat.ContainsKey(ev.Player.Id))
+                {
+                    LastHeat.Remove(ev.Player.Id);
+                }
+                if (InBlizzard.ContainsKey(ev.Player.Id))
+                {
+                    InBlizzard.Remove(ev.Player.Id);
+                }
+
+            }
+        }
+
+        private void OnPlayerDied(DiedEventArgs ev)
+        {
+            Player player = ev.Player;
+
+            lock (_dictLock)
+            {
+                if (LastHeat.ContainsKey(ev.Player.Id))
+                {
+                    LastHeat[player.Id] = DateTime.MinValue;
+                }
+                if (InBlizzard.ContainsKey(ev.Player.Id))
+                {
+                    InBlizzard[player.Id] = false;
+                }
             }
 
         }
-
-
     }
 }
